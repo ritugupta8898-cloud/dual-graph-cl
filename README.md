@@ -19,9 +19,9 @@ Instead of freezing the whole network, we just softly lower the learning rate on
 
 ## The Results
 
-We tested this on a 5-task Split-MNIST benchmark. The results prove the gradient scaling theory works perfectly.
+I tested this on a 5-task Split-MNIST benchmark. 
 
-Our Dual-Graph Model (High Memory):
+Dual-Graph Model (High Memory):
 - Task 0 started at 96.88% and ended at 96.74% even after learning 4 completely new tasks. 
 - It retained almost everything.
 - Task 4 finished at 97.43%.
@@ -31,9 +31,6 @@ Standard Baseline Network (Failed):
 - Task 4 got stuck at 58%.
 - Without our Control Graph, the network just overwrote its own weights and became mediocre at everything.
 
-## The Golden Rule: Use SGD
-
-Do not use the Adam optimizer with this architecture. Adam automatically adjusts learning rates based on variance, which completely overrides our Control Graph's attempt to lower the learning rate on important neurons. You must use SGD so the physical size of the weight updates actually gets smaller when we tell it to.
 
 ## How to Run It
 
