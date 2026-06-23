@@ -2,7 +2,7 @@
 
 This is the implementation of my attempt at solving the catastrophic forgetting problem in neural networks. 
 
-Normally, when a neural network learns a new task, it overwrites the weights it used for the old tasks. This means it completely forgets the first thing it learned. This project stops that from happening by using two separate graphs working together, without using replay buffers or hard parameter freezing.
+Normally, when a neural network learns a new task, it overwrites the weights it used for the old tasks. This means it completely forgets the first thing it learned. This project  tries stops that from happening by using two separate graphs working together, without using replay buffers or hard parameter freezing.
 
 ## How it Works
 
@@ -23,12 +23,12 @@ I tested this on a 5-task Split-MNIST benchmark.
 
 Dual-Graph Model (High Memory):
 - Task 0 started at 96.88% and ended at 96.74% even after learning 4 completely new tasks. 
-- It retained almost everything.
-- Task 4 finished at 97.43%.
+- However this was at this stage not consistent across all tests that problem will be solved later 
 
 Standard Baseline Network (Failed):
 - Task 0 got stuck at 79%.
 - Task 4 got stuck at 58%.
+- These were found to ve consistent across various reruns
 - Without our Control Graph, the network just overwrote its own weights and became mediocre at everything.
 
 
