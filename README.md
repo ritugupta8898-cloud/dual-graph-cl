@@ -1,4 +1,4 @@
-# Dual-Graph Mechanical Neuromodulation
+# Dual-Graph Mechanical-CL
 
 This is the implementation of my attempt at solving catastrophic forgetting in neural networks. 
 
