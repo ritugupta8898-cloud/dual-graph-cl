@@ -6,7 +6,19 @@ from torchvision import datasets, transforms
 
 from models.dual_graph import DualGraphNetwork
 from models.graph_builder import build_graph
+#setting the seeds 
+import random
+import numpy as np
 
+SEED = 63
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # harmless if no GPU
+
+set_seed(SEED)
 # ---------- data ----------
 transform = transforms.ToTensor()
 train_full = datasets.MNIST(root='./data', train=True, download=True, transform=transform)

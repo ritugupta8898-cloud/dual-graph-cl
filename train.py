@@ -6,7 +6,20 @@ from torchvision import datasets, transforms
 
 from models.dual_graph import DualGraphNetwork
 from models.graph_builder import build_graph
+#setting the seeds
+import random
+import numpy as np
 
+SEED = 7
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  
+
+set_seed(SEED)
 # ---------- data ----------
 transform = transforms.ToTensor()
 train_full = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
@@ -101,7 +114,10 @@ for task_id, loader in enumerate(train_loaders):
             Ak_averaged += AK.mean(dim=0).detach()
     Ak_averaged/=len(loader)
     importance_memory = torch.maximum(importance_memory,Ak_averaged).detach()
-    supression = torch.clamp(1.0 - importance_memory, min=0.1).detach()
+    normalized_importance = importance_memory / (importance_memory.max() + 1e-8)
+    supression = torch.clamp(1.0 - normalized_importance, min=0.1).detach()
+    print(f"Task {task_id} | importance_memory: min={importance_memory.min():.4f} max={importance_memory.max():.4f} mean={importance_memory.mean():.4f}")
+    print(f"Task {task_id} | supression: min={supression.min():.4f} max={supression.max():.4f} mean={supression.mean():.4f}")
 
     print(f"task {task_id} done, last batch loss: {loss.item():.4f}")
 
