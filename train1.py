@@ -17,7 +17,7 @@ def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  
+    torch.cuda.manual_seed_all(seed)
 
 set_seed(SEED)
 # ---------- data ----------
@@ -35,11 +35,13 @@ def split_tasks(dataset, num_tasks=NUM_TASKS):
         idx = [i for i, (_, y) in enumerate(dataset) if lo <= y < hi]
         tasks.append(Subset(dataset, idx))
     return tasks
+
 def masked_logits(logits, task_id, classes_per_task):
     mask = torch.full_like(logits, float('-inf'))
     lo, hi = task_id * classes_per_task, (task_id + 1) * classes_per_task
     mask[:, lo:hi] = 0
     return logits + mask
+
 train_task = split_tasks(train_full)
 test_task = split_tasks(test_full)
 
@@ -53,7 +55,8 @@ output_dim = 10
 context_dim = NUM_TASKS
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-W = build_graph(hidden_dims)
+# 202-node graph: hidden layers + output layer only, no raw input gating
+W = build_graph(hidden_dims + [output_dim])
 W = W.to(device)
 
 model = DualGraphNetwork(input_dim, hidden_dims, output_dim, context_dim, W,
@@ -61,7 +64,10 @@ model = DualGraphNetwork(input_dim, hidden_dims, output_dim, context_dim, W,
 
 optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 
-# ---------- eval function ----------
+ALL_DIMS = hidden_dims + [output_dim]  # [128, 64, 10]
+TOTAL_NODES = sum(ALL_DIMS)  # 202
+
+# ---------- eval function (task-incremental, single-task mask) ----------
 @torch.no_grad()
 def evaluate(task_id, loader):
     model.eval()
@@ -81,12 +87,12 @@ def evaluate(task_id, loader):
 # ---------- training loop ----------
 EPOCHS_PER_TASK = 15
 acc_matrix = torch.zeros(NUM_TASKS, NUM_TASKS)
-importance_memory = torch.zeros(192, device=device)
+importance_memory = torch.zeros(TOTAL_NODES, device=device)
 
 supression = None
 for task_id, loader in enumerate(train_loaders):
     model.train()
-    Ak_averaged = torch.zeros(192,device=device)
+    Ak_averaged = torch.zeros(TOTAL_NODES, device=device)
     for epoch in range(EPOCHS_PER_TASK):
         for x, y in loader:
             x = x.view(x.size(0), -1).to(device)
@@ -100,20 +106,30 @@ for task_id, loader in enumerate(train_loaders):
             loss.backward()
             if supression is not None:
                 with torch.no_grad():
+                    # supression layout: [hidden1(128), hidden2(64), output(10)] -- no input slice now
                     offset = 0
                     for layer in model.g_main.layers:
                         h_dim = layer.out_features
-                        s_slice = supression[offset : offset + h_dim].unsqueeze(1)
+                        s_slice = supression[offset: offset + h_dim].unsqueeze(1)
                         if layer.weight.grad is not None:
                             layer.weight.grad *= s_slice
                         if layer.bias.grad is not None:
                             layer.bias.grad *= s_slice.squeeze()
                         offset += h_dim
+                    # output head layer
+                    head = model.g_main.head
+                    h_dim = head.out_features
+                    s_slice = supression[offset: offset + h_dim].unsqueeze(1)
+                    if head.weight.grad is not None:
+                        head.weight.grad *= s_slice
+                    if head.bias.grad is not None:
+                        head.bias.grad *= s_slice.squeeze()
+                    offset += h_dim
 
             optimizer.step()
             Ak_averaged += AK.mean(dim=0).detach()
-    Ak_averaged/=len(loader)
-    importance_memory = torch.maximum(importance_memory,Ak_averaged).detach()
+    Ak_averaged /= len(loader)
+    importance_memory = torch.maximum(importance_memory, Ak_averaged).detach()
     normalized_importance = importance_memory / (importance_memory.max() + 1e-8)
     supression = torch.clamp(1.0 - normalized_importance, min=0.1).detach()
     print(f"Task {task_id} | importance_memory: min={importance_memory.min():.4f} max={importance_memory.max():.4f} mean={importance_memory.mean():.4f}")
@@ -121,7 +137,6 @@ for task_id, loader in enumerate(train_loaders):
 
     print(f"task {task_id} done, last batch loss: {loss.item():.4f}")
 
-    # eval on all tasks seen so far
     for eval_task_id in range(task_id + 1):
         acc_matrix[task_id, eval_task_id] = evaluate(eval_task_id, test_loaders[eval_task_id])
 
@@ -154,7 +169,7 @@ def evaluate_all_mixed(model, full_test_dataset, device, num_tasks, classes_per_
             z_infer = torch.zeros(batch_size, num_tasks, device=device)
             z_infer[:, t] = 1.0
             out_infer, _, _ = model(x, z_infer)
-            
+
             lo, hi = t * classes_per_task, (t + 1) * classes_per_task
             all_logits[:, lo:hi] = out_infer[:, lo:hi]
 
@@ -164,19 +179,11 @@ def evaluate_all_mixed(model, full_test_dataset, device, num_tasks, classes_per_
 
     acc_oracle = correct_oracle / total
     acc_inferred = correct_inferred / total
-    
+
     print("\n=== Global Mixed Accuracy (All 10 Classes) ===")
     print(f"Oracle Accuracy:     {acc_oracle:.4f}")
     print(f"Inferred Accuracy:   {acc_inferred:.4f}")
-    
+
     return acc_oracle, acc_inferred
+
 evaluate_all_mixed(model, test_full, device, NUM_TASKS, classes_per_task)
-model.eval()
-with torch.no_grad():
-    # grab final layer weights and biases directly
-    final_layer = model.g_main.layers[-1]  # adjust to your actual attribute name
-    for t in range(NUM_TASKS):
-        lo, hi = t*classes_per_task, (t+1)*classes_per_task
-        w_norm = final_layer.weight[lo:hi].norm().item()
-        b_val = final_layer.bias[lo:hi].mean().item()
-        print(f"Task {t}: weight norm={w_norm:.3f}, bias mean={b_val:.3f}")
